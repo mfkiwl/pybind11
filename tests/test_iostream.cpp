@@ -17,15 +17,14 @@
 #include <iostream>
 #include <thread>
 
-
-void noisy_function(std::string msg, bool flush) {
+void noisy_function(const std::string &msg, bool flush) {
 
     std::cout << msg;
     if (flush)
         std::cout << std::flush;
 }
 
-void noisy_funct_dual(std::string msg, std::string emsg) {
+void noisy_funct_dual(const std::string &msg, const std::string &emsg) {
     std::cout << msg;
     std::cerr << emsg;
 }
@@ -34,7 +33,7 @@ void noisy_funct_dual(std::string msg, std::string emsg) {
 // simply repeatedly write to std::cerr until stopped
 // redirect is called at some point to test the safety of scoped_estream_redirect
 struct TestThread {
-    TestThread() : t_{nullptr}, stop_{false} {
+    TestThread() : stop_{false} {
         auto thread_f = [this] {
             while (!stop_) {
                 std::cout << "x" << std::flush;
@@ -49,7 +48,7 @@ struct TestThread {
 
     void stop() { stop_ = true; }
 
-    void join() {
+    void join() const {
         py::gil_scoped_release gil_lock;
         t_->join();
     }
@@ -59,7 +58,7 @@ struct TestThread {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    std::thread * t_;
+    std::thread *t_{nullptr};
     std::atomic<bool> stop_;
 };
 
@@ -70,12 +69,12 @@ TEST_SUBMODULE(iostream, m) {
 
     // test_evals
 
-    m.def("captured_output_default", [](std::string msg) {
+    m.def("captured_output_default", [](const std::string &msg) {
         py::scoped_ostream_redirect redir;
         std::cout << msg << std::flush;
     });
 
-    m.def("captured_output", [](std::string msg) {
+    m.def("captured_output", [](const std::string &msg) {
         py::scoped_ostream_redirect redir(std::cout, py::module_::import("sys").attr("stdout"));
         std::cout << msg << std::flush;
     });
@@ -84,7 +83,7 @@ TEST_SUBMODULE(iostream, m) {
             py::call_guard<py::scoped_ostream_redirect>(),
             py::arg("msg"), py::arg("flush")=true);
 
-    m.def("captured_err", [](std::string msg) {
+    m.def("captured_err", [](const std::string &msg) {
         py::scoped_ostream_redirect redir(std::cerr, py::module_::import("sys").attr("stderr"));
         std::cerr << msg << std::flush;
     });
@@ -95,15 +94,11 @@ TEST_SUBMODULE(iostream, m) {
             py::call_guard<py::scoped_ostream_redirect, py::scoped_estream_redirect>(),
             py::arg("msg"), py::arg("emsg"));
 
-    m.def("raw_output", [](std::string msg) {
-        std::cout << msg << std::flush;
-    });
+    m.def("raw_output", [](const std::string &msg) { std::cout << msg << std::flush; });
 
-    m.def("raw_err", [](std::string msg) {
-        std::cerr << msg << std::flush;
-    });
+    m.def("raw_err", [](const std::string &msg) { std::cerr << msg << std::flush; });
 
-    m.def("captured_dual", [](std::string msg, std::string emsg) {
+    m.def("captured_dual", [](const std::string &msg, const std::string &emsg) {
         py::scoped_ostream_redirect redirout(std::cout, py::module_::import("sys").attr("stdout"));
         py::scoped_ostream_redirect redirerr(std::cerr, py::module_::import("sys").attr("stderr"));
         std::cout << msg << std::flush;

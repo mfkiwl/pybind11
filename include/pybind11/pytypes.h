@@ -319,11 +319,15 @@ PYBIND11_NAMESPACE_BEGIN(detail)
 inline std::string error_string();
 PYBIND11_NAMESPACE_END(detail)
 
+#if defined(_MSC_VER)
+#  pragma warning(push)
+#  pragma warning(disable: 4275 4251) // warning C4275: An exported class was derived from a class that wasn't exported. Can be ignored when derived from a STL class.
+#endif
 /// Fetch and hold an error which was already set in Python.  An instance of this is typically
 /// thrown to propagate python-side errors back through C++ which can either be caught manually or
 /// else falls back to the function dispatcher (which then raises the captured error back to
 /// python).
-class error_already_set : public std::runtime_error {
+class PYBIND11_EXPORT error_already_set : public std::runtime_error {
 public:
     /// Constructs a new exception from the current Python error indicator, if any.  The current
     /// Python error indicator will be cleared.
@@ -371,6 +375,9 @@ public:
 private:
     object m_type, m_value, m_trace;
 };
+#if defined(_MSC_VER)
+#  pragma warning(pop)
+#endif
 
 /** \defgroup python_builtins _
     Unless stated otherwise, the following C++ functions behave the same
@@ -478,6 +485,43 @@ inline handle get_function(handle value) {
     return value;
 }
 
+// Reimplementation of python's dict helper functions to ensure that exceptions
+// aren't swallowed (see #2862)
+
+// copied from cpython _PyDict_GetItemStringWithError
+inline PyObject * dict_getitemstring(PyObject *v, const char *key)
+{
+#if PY_MAJOR_VERSION >= 3
+    PyObject *kv, *rv;
+    kv = PyUnicode_FromString(key);
+    if (kv == NULL) {
+        throw error_already_set();
+    }
+
+    rv = PyDict_GetItemWithError(v, kv);
+    Py_DECREF(kv);
+    if (rv == NULL && PyErr_Occurred()) {
+        throw error_already_set();
+    }
+    return rv;
+#else
+    return PyDict_GetItemString(v, key);
+#endif
+}
+
+inline PyObject * dict_getitem(PyObject *v, PyObject *key)
+{
+#if PY_MAJOR_VERSION >= 3
+    PyObject *rv = PyDict_GetItemWithError(v, key);
+    if (rv == NULL && PyErr_Occurred()) {
+        throw error_already_set();
+    }
+    return rv;
+#else
+    return PyDict_GetItem(v, key);
+#endif
+}
+
 // Helper aliases/functions to support implicit casting of values given to python accessors/methods.
 // When given a pyobject, this simply returns the pyobject as-is; for other C++ type, the value goes
 // through pybind11::cast(obj) to convert it to an `object`.
@@ -496,7 +540,7 @@ class accessor : public object_api<accessor<Policy>> {
 public:
     accessor(handle obj, key_type key) : obj(obj), key(std::move(key)) { }
     accessor(const accessor &) = default;
-    accessor(accessor &&) = default;
+    accessor(accessor &&) noexcept = default;
 
     // accessor overload required to override default assignment operator (templates are not allowed
     // to replace default compiler-generated assignments).
@@ -1501,7 +1545,7 @@ public:
         detail::any_container<ssize_t> shape,
         detail::any_container<ssize_t> strides) {
         return memoryview::from_buffer(
-            const_cast<void*>(ptr), itemsize, format, shape, strides, true);
+            const_cast<void *>(ptr), itemsize, format, std::move(shape), std::move(strides), true);
     }
 
     template<typename T>
